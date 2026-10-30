@@ -1140,15 +1140,26 @@
     if (error) { errorForm.textContent = error; errorForm.classList.add('visible'); return; }
     if (nueva.notif) await pedirPermisoNotif();
 
-    const cambioLimites = nueva.max !== config.max || nueva.min !== config.min ||
-                          nueva.maxActiva !== config.maxActiva || nueva.minActiva !== config.minActiva;
     config = nueva;
     guardarConfigEnDisco(config);
-    if (cambioLimites) { estadoAlarma.max = 'armada'; estadoAlarma.min = 'armada'; }
+
+    // Al guardar, las alarmas se re-arman SIEMPRE (aunque no hayas cambiado
+    // nada), y se evaluan en el acto contra la ultima lectura: si la
+    // temperatura ya esta pasada del limite, suena enseguida sin esperar
+    // a la proxima lectura.
+    estadoAlarma.max = 'armada';
+    estadoAlarma.min = 'armada';
 
     actualizarResumen();
     agregarLinea('--- Alarmas guardadas: ' + resumenAlarmas.textContent.replace(/^Alarmas: /, '') + ' ---', 'linea-sistema');
     cerrarModal();
+
+    const ultima = registro[registro.length - 1];
+    if (ultima && (Date.now() - ultima.fecha) / 1000 <= SEGUNDOS_DATO_VIEJO) {
+      evaluarAlarmas(ultima.temp);
+    }
+    // Si no hay una lectura reciente, la proxima que llegue la evalua
+    // (las alarmas ya quedaron armadas).
   }
 
   async function probarAlarma() {

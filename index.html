@@ -347,6 +347,7 @@
   <p class="nota">
     Necesita Chrome, Edge u Opera en escritorio o Android.
     Safari y todos los navegadores de iPhone no soportan Web Bluetooth.
+    <br>Versión de la página: <b id="versionPagina"></b>
   </p>
 
   <!-- ================= Menu flotante de alarmas ================= -->
@@ -427,6 +428,9 @@
   // Tienen que coincidir exactamente con los UUID del sketch.
   // Son lo unico que la pagina necesita saber de la placa: funciona igual
   // con un ESP32 clasico o con un ESP32-C3 SuperMini.
+  // Subir este numero en cada cambio: sirve para saber si el navegador
+  // esta mostrando la version nueva o una vieja guardada en cache.
+  const VERSION_PAGINA = '1.4 (alarma al guardar)';
   const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
   const CHARACTERISTIC_UUID = 'abcd1234-ab12-cd34-ef56-1234567890ab';
 
@@ -1197,6 +1201,8 @@
   setInterval(actualizarReloj, 1000);
 
   comprobarEntorno();
+  document.getElementById('versionPagina').textContent = VERSION_PAGINA;
+  agregarLinea('Solarmate - pagina version ' + VERSION_PAGINA, 'linea-sistema');
 
   btnLimpiar.onclick = () => {
     consola.innerHTML = '';

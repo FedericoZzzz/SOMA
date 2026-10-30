@@ -387,6 +387,10 @@
               <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h10M7 13h6"/></svg>Notificación</span></label>
           </div>
           <p class="ayuda" id="ayudaSoporte"></p>
+          <div class="acciones-registro">
+            <button class="secundario" id="btnProbarVibracion" type="button">Probar solo la vibración</button>
+          </div>
+          <p class="ayuda" id="resultadoVibracion"></p>
         </div>
 
         <div class="seccion">
@@ -434,7 +438,7 @@
   // con un ESP32 clasico o con un ESP32-C3 SuperMini.
   // Subir este numero en cada cambio: sirve para saber si el navegador
   // esta mostrando la version nueva o una vieja guardada en cache.
-  const VERSION_PAGINA = '1.5 (se apaga al volver al rango)';
+  const VERSION_PAGINA = '1.6 (diagnostico de vibracion)';
   const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
   const CHARACTERISTIC_UUID = 'abcd1234-ab12-cd34-ef56-1234567890ab';
 
@@ -976,6 +980,38 @@
     });
   }
 
+  // ---- Vibracion ----
+  // Chrome para Android solo vibra si:
+  //   1. el usuario ya toco la pagina al menos una vez (activacion del usuario),
+  //   2. la pagina esta visible (pantalla prendida y esta pestaña adelante),
+  //   3. el telefono no esta en Silencio total ni en No molestar, y tiene
+  //      la vibracion activada en Ajustes del sistema.
+  // Las dos primeras se pueden comprobar desde aca; la tercera no, porque
+  // el navegador no informa la configuracion del telefono.
+  let vibracionInformada = false;
+  function vibrar(patron) {
+    if (!('vibrate' in navigator)) {
+      return { ok: false, texto: 'este navegador no puede vibrar (iPhone y la mayoria de las PC no tienen vibracion web).' };
+    }
+    if (document.visibilityState !== 'visible') {
+      return { ok: false, texto: 'no se pudo, la pagina no estaba visible (pantalla apagada o otra app adelante).' };
+    }
+    if (navigator.userActivation && !navigator.userActivation.hasBeenActive) {
+      return { ok: false, texto: 'Chrome la bloquea hasta que toques la pagina una vez. Toca cualquier parte de la pantalla.' };
+    }
+    let ok = false;
+    try { ok = navigator.vibrate(patron); } catch (e) {}
+    if (!ok) return { ok: false, texto: 'Chrome rechazo la vibracion.' };
+    return { ok: true, texto: 'pedida al telefono. Si no vibro, revisa que no este en Silencio / No molestar y que la vibracion este activada en Ajustes.' };
+  }
+
+  function probarVibracion() {
+    // Llamada directa dentro del toque: es el caso mas favorable posible
+    const r = vibrar([600, 200, 600]);
+    $('resultadoVibracion').textContent = (r.ok ? 'Pedido de vibración enviado. ' : 'No se pudo vibrar: ') +
+      (r.ok ? '¿Vibró? Si no, el bloqueo está en el teléfono: sacá el modo Silencio / No molestar y activá la vibración en Ajustes → Sonido y vibración.' : r.texto);
+  }
+
   let intervaloAlarma = null, finAlarma = null;
   let tipoSonando = null;               // 'max', 'min' o null
   function detenerAlarma() {
@@ -1026,6 +1062,7 @@
 
     detenerAlarma();
     tipoSonando = tipo;
+    vibracionInformada = false;
     $('alarmaTitulo').textContent = titulo;
     $('alarmaMensaje').textContent = mensaje + ' Se apaga sola si vuelve al rango durante ' + config.espera + ' s.';
     alarmaActiva.className = 'alarma-activa visible ' + tipo;
@@ -1034,7 +1071,14 @@
 
     const ciclo = () => {
       if (config.sonido) pitidos(tipo);
-      if (config.vibrar) { try { navigator.vibrate && navigator.vibrate([500, 250, 500, 250, 500]); } catch (e) {} }
+      if (config.vibrar) {
+        const r = vibrar([500, 250, 500, 250, 500]);
+        // Se informa una sola vez por alarma, para no llenar la consola
+        if (!vibracionInformada) {
+          vibracionInformada = true;
+          agregarLinea('Vibracion: ' + r.texto, r.ok ? 'linea-sistema' : 'linea-falla');
+        }
+      }
     };
     if (config.sonido || config.vibrar) {
       ciclo();
@@ -1236,6 +1280,7 @@
   chkMax.onchange = chkMin.onchange = actualizarHabilitados;
   valMax.oninput = valMin.oninput = llenarEjemplos;
   document.querySelectorAll('input[name="modoMsg"]').forEach(r => r.onchange = actualizarModoMsg);
+  $('btnProbarVibracion').onclick = probarVibracion;
   chkNotif.onchange = async () => { if (chkNotif.checked) { await pedirPermisoNotif(); actualizarAyudaSoporte(); } };
 
   actualizarResumen();

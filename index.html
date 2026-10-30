@@ -1,0 +1,1197 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Solarmate — Monitor DS18B20</title>
+<style>
+  :root {
+    --fondo: #101418;
+    --panel: #171c22;
+    --borde: #262d36;
+    --texto: #e6e9ec;
+    --texto-tenue: #8b949e;
+    --acento: #4ea3ff;
+    --ok: #4caf72;
+    --falla: #e05a5a;
+    --consola-fondo: #0c1013;
+    --consola-texto: #b8d4c0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--fondo);
+    color: var(--texto);
+    font-family: -apple-system, "Segoe UI", Roboto, sans-serif;
+    padding: 32px 20px 48px;
+  }
+  .contenedor { max-width: 720px; margin: 0 auto; }
+
+  h1 { font-size: 20px; font-weight: 600; margin: 0 0 4px; }
+  .subtitulo { color: var(--texto-tenue); font-size: 14px; margin: 0 0 28px; }
+
+  .panel {
+    background: var(--panel);
+    border: 1px solid var(--borde);
+    border-radius: 12px;
+    padding: 28px;
+    margin-bottom: 20px;
+  }
+
+  .fila-estado {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 13px; color: var(--texto-tenue); margin-bottom: 24px;
+  }
+  .punto { width: 9px; height: 9px; border-radius: 50%; background: var(--texto-tenue); }
+  .punto.conectado { background: var(--ok); }
+  .punto.falla { background: var(--falla); }
+
+  .lectura-bloque { text-align: center; }
+  .lectura {
+    font-size: 72px; font-weight: 600; line-height: 1;
+    font-variant-numeric: tabular-nums;
+    color: #3a4550; transition: color .3s;
+  }
+  .lectura.activa { color: var(--acento); }
+  .unidad { font-size: 26px; color: var(--texto-tenue); font-weight: 400; }
+  .metodo { margin-top: 10px; font-size: 13px; color: var(--texto-tenue); }
+
+  .acciones { display: flex; gap: 12px; margin-top: 28px; }
+  button {
+    flex: 1; padding: 14px; border-radius: 9px; border: none;
+    font-size: 15px; font-weight: 600; cursor: pointer;
+    background: var(--acento); color: #0c1013;
+  }
+  button.secundario { background: transparent; color: var(--texto-tenue); border: 1px solid var(--borde); }
+  button:disabled { background: var(--borde); color: var(--texto-tenue); cursor: not-allowed; }
+
+  .diagnostico {
+    margin-top: 10px; width: 100%; font-size: 13px; font-weight: 400;
+    padding: 11px;
+  }
+
+  .aviso {
+    margin-top: 16px; font-size: 13px; color: var(--falla);
+    line-height: 1.5; display: none;
+  }
+  .aviso.visible { display: block; }
+
+  .titulo-consola {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 14px; font-weight: 600; margin: 0 0 12px;
+  }
+  .titulo-consola span { color: var(--texto-tenue); font-size: 12px; font-weight: 400; }
+  .consola {
+    background: var(--consola-fondo);
+    border: 1px solid var(--borde);
+    border-radius: 8px;
+    padding: 16px;
+    height: 300px;
+    overflow-y: auto;
+    font-family: "SF Mono", Menlo, Consolas, monospace;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--consola-texto);
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .consola .linea-falla { color: var(--falla); }
+  .consola .linea-sistema { color: var(--texto-tenue); }
+  .consola .hora { color: #5d6b78; }
+
+  .reloj {
+    display: flex; justify-content: space-between; align-items: baseline;
+    flex-wrap: wrap; gap: 4px 12px;
+    font-size: 13px; color: var(--texto-tenue); margin-bottom: 20px;
+    font-variant-numeric: tabular-nums;
+  }
+  .reloj strong { color: var(--texto); font-weight: 600; font-size: 15px; }
+  .ultima {
+    margin-top: 8px; font-size: 13px; color: var(--texto-tenue);
+    font-variant-numeric: tabular-nums;
+  }
+  .ultima.vieja { color: #e0a84e; }
+
+  .tabla-wrap { max-height: 280px; overflow-y: auto; border: 1px solid var(--borde); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; font-variant-numeric: tabular-nums; }
+  th, td { padding: 8px 12px; text-align: left; border-bottom: 1px solid var(--borde); }
+  th { position: sticky; top: 0; background: var(--panel); color: var(--texto-tenue); font-weight: 500; }
+  td.num, th.num { text-align: right; }
+  tr:last-child td { border-bottom: none; }
+  .vacio { padding: 18px; text-align: center; color: var(--texto-tenue); font-size: 13px; }
+  .acciones-registro { display: flex; gap: 10px; margin-top: 12px; }
+  .acciones-registro button { padding: 10px; font-size: 13px; }
+
+  .nota {
+    margin-top: 24px; font-size: 12px; color: var(--texto-tenue);
+    line-height: 1.6; text-align: center;
+  }
+  .nota a { color: var(--acento); }
+
+  .bloqueo {
+    display: none;
+    background: #2a1a12; border: 1px solid #7a4420;
+    border-radius: 10px; padding: 18px 20px; margin-bottom: 20px;
+    font-size: 14px; line-height: 1.6; color: #f0d9c8;
+  }
+  .bloqueo.visible { display: block; }
+  .bloqueo-titulo {
+    font-weight: 600; color: #f5a97f; margin-bottom: 10px; font-size: 15px;
+  }
+  .bloqueo code {
+    background: #140d09; padding: 2px 6px; border-radius: 4px;
+    font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 13px;
+    color: #ffc9a3; display: inline-block;
+  }
+  .bloqueo ol { margin: 10px 0 0; padding-left: 22px; }
+  .bloqueo li { margin-bottom: 7px; }
+  .bloqueo .origen {
+    margin-top: 12px; font-size: 12.5px; color: #c9a992;
+  }
+
+  /* ---------- Encabezado con boton de alarmas ---------- */
+  .encabezado { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 28px; }
+  .encabezado .subtitulo { margin: 0; }
+  .btn-alarmas {
+    flex: none; display: inline-flex; align-items: center; gap: 7px;
+    padding: 10px 14px; font-size: 14px; border-radius: 9px;
+    background: var(--panel); color: var(--texto); border: 1px solid var(--borde);
+  }
+  .btn-alarmas svg { width: 17px; height: 17px; }
+  .btn-alarmas.activas { border-color: var(--acento); color: var(--acento); }
+  .resumen-alarmas { margin-top: 6px; font-size: 12.5px; color: var(--texto-tenue); text-align: center; }
+  .resumen-alarmas b { color: var(--texto); font-weight: 600; }
+
+  /* ---------- Menu flotante ---------- */
+  .fondo-modal {
+    position: fixed; inset: 0; z-index: 50;
+    background: rgba(5, 8, 11, .62);
+    display: none; align-items: center; justify-content: center;
+    padding: 28px 22px;
+  }
+  .fondo-modal.abierto { display: flex; animation: aparecer .15s ease-out; }
+  @keyframes aparecer { from { opacity: 0; } to { opacity: 1; } }
+  .modal {
+    width: 100%; max-width: 430px; max-height: 76vh;
+    display: flex; flex-direction: column; overflow: hidden;
+    background: var(--panel); border: 1px solid var(--borde); border-radius: 14px;
+    box-shadow: 0 18px 50px rgba(0,0,0,.5);
+    animation: subir .18s ease-out;
+  }
+  @keyframes subir { from { transform: translateY(12px); } to { transform: none; } }
+  .modal-cabecera {
+    flex: none;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: 18px 20px 14px; border-bottom: 1px solid var(--borde);
+  }
+  .modal-cabecera h2 { margin: 0; font-size: 17px; font-weight: 600; }
+  .btn-cerrar {
+    flex: none; width: 34px; height: 34px; padding: 0; border-radius: 8px;
+    background: transparent; color: var(--texto-tenue); font-size: 22px; line-height: 1;
+  }
+  .btn-cerrar:hover { background: var(--borde); color: var(--texto); }
+  .modal-cuerpo { flex: 1; min-height: 0; overflow-y: auto; padding: 6px 20px 8px; overscroll-behavior: contain; }
+  .seccion { padding: 16px 0; border-bottom: 1px solid var(--borde); }
+  .seccion:last-child { border-bottom: none; }
+  .seccion-titulo { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--texto-tenue); margin: 0 0 12px; }
+
+  .fila-limite { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+  .fila-limite:last-child { margin-bottom: 0; }
+  .fila-limite label { flex: 1; display: flex; align-items: center; gap: 10px; font-size: 14px; cursor: pointer; }
+  .campo-num { display: flex; align-items: center; gap: 6px; color: var(--texto-tenue); font-size: 14px; }
+  .campo-num input {
+    width: 86px; padding: 9px 10px; border-radius: 8px; text-align: right;
+    background: var(--consola-fondo); border: 1px solid var(--borde); color: var(--texto);
+    font-size: 15px; font-variant-numeric: tabular-nums;
+  }
+  .campo-num input:disabled { opacity: .45; }
+  .marca-max { color: #f08a5d; } .marca-min { color: #6cb6ff; }
+
+  .opciones { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+  .chip { position: relative; }
+  .chip input { position: absolute; opacity: 0; pointer-events: none; }
+  .chip span {
+    display: flex; flex-direction: column; align-items: center; gap: 5px;
+    padding: 12px 6px; border-radius: 10px; border: 1px solid var(--borde);
+    font-size: 13px; color: var(--texto-tenue); cursor: pointer; user-select: none;
+    transition: border-color .15s, color .15s, background .15s;
+  }
+  .chip span svg { width: 20px; height: 20px; }
+  .chip input:checked + span { border-color: var(--acento); color: var(--texto); background: rgba(78,163,255,.09); }
+  .chip input:focus-visible + span { outline: 2px solid var(--acento); outline-offset: 2px; }
+
+  .selector { display: flex; background: var(--consola-fondo); border: 1px solid var(--borde); border-radius: 10px; padding: 3px; margin-bottom: 14px; }
+  .selector label { flex: 1; }
+  .selector input { position: absolute; opacity: 0; pointer-events: none; }
+  .selector span { display: block; text-align: center; padding: 8px 6px; border-radius: 7px; font-size: 13px; color: var(--texto-tenue); cursor: pointer; }
+  .selector input:checked + span { background: var(--borde); color: var(--texto); }
+
+  .campo-texto { margin-bottom: 12px; }
+  .campo-texto:last-child { margin-bottom: 0; }
+  .campo-texto label { display: block; font-size: 13px; margin-bottom: 6px; }
+  .campo-texto textarea {
+    width: 100%; min-height: 58px; resize: vertical; padding: 9px 10px; border-radius: 8px;
+    background: var(--consola-fondo); border: 1px solid var(--borde); color: var(--texto);
+    font: inherit; font-size: 14px; line-height: 1.4;
+  }
+  .ayuda { font-size: 12px; color: var(--texto-tenue); line-height: 1.5; margin-top: 8px; }
+  .ayuda code { background: var(--consola-fondo); padding: 1px 5px; border-radius: 4px; font-size: 11.5px; }
+  .ejemplos { list-style: none; margin: 0; padding: 0; font-size: 13px; line-height: 1.45; }
+  .ejemplos li { padding: 8px 10px; border-radius: 8px; background: var(--consola-fondo); margin-bottom: 6px; color: #cfd6dc; }
+  .ejemplos li::before { margin-right: 6px; }
+  .ejemplos.max li::before { content: '▲'; color: #f08a5d; }
+  .ejemplos.min li::before { content: '▼'; color: #6cb6ff; }
+  .sub-ejemplos { font-size: 12px; color: var(--texto-tenue); margin: 12px 0 6px; }
+
+  .modal-pie { flex: none; display: flex; gap: 10px; padding: 14px 20px 18px; border-top: 1px solid var(--borde); }
+  .modal-pie button { padding: 12px; font-size: 14px; }
+  .error-form { flex: none; color: var(--falla); font-size: 13px; padding: 10px 20px 0; display: none; }
+  .error-form.visible { display: block; }
+
+  /* ---------- Cartel de alarma sonando ---------- */
+  .alarma-activa {
+    position: fixed; left: 50%; top: 16px; transform: translateX(-50%); z-index: 60;
+    width: calc(100% - 32px); max-width: 460px;
+    display: none; gap: 14px; align-items: center;
+    padding: 14px 16px; border-radius: 12px; color: #fff;
+    box-shadow: 0 12px 40px rgba(0,0,0,.55);
+  }
+  .alarma-activa.visible { display: flex; animation: latido 1s ease-in-out infinite; }
+  .alarma-activa.max { background: #b4432a; }
+  .alarma-activa.min { background: #2a5fb4; }
+  @keyframes latido { 50% { box-shadow: 0 12px 40px rgba(0,0,0,.55), 0 0 0 6px rgba(255,255,255,.12); } }
+  .alarma-activa .txt { flex: 1; font-size: 14px; line-height: 1.4; }
+  .alarma-activa .txt b { display: block; font-size: 15px; margin-bottom: 2px; }
+  .alarma-activa button { flex: none; padding: 10px 14px; font-size: 14px; background: #fff; color: #111; }
+</style>
+</head>
+<body>
+<div class="contenedor">
+
+  <div class="encabezado">
+    <div>
+      <h1>Solarmate — Monitor DS18B20</h1>
+      <p class="subtitulo">Lectura en vivo del sensor por Bluetooth · ESP32-C3 SuperMini, datos en GPIO 4</p>
+    </div>
+    <button id="btnAlarmas" class="btn-alarmas" aria-haspopup="dialog">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+      Alarmas
+    </button>
+  </div>
+
+  <div class="alarma-activa" id="alarmaActiva" role="alert">
+    <div class="txt"><b id="alarmaTitulo"></b><span id="alarmaMensaje"></span></div>
+    <button id="btnDetener">Detener</button>
+  </div>
+
+  <div class="bloqueo" id="bloqueo">
+    <div class="bloqueo-titulo">Esta pagina no puede usar Bluetooth asi</div>
+    <div id="bloqueoTexto"></div>
+  </div>
+
+  <div class="panel">
+    <div class="reloj">
+      <span id="fechaHoy">--</span>
+      <strong id="horaAhora">--:--:--</strong>
+    </div>
+
+    <div class="fila-estado">
+      <span class="punto" id="punto"></span>
+      <span id="textoEstado">Sin conectar</span>
+    </div>
+
+    <div class="lectura-bloque">
+      <span class="lectura" id="lectura">--.--</span><span class="unidad"> °C</span>
+      <div class="ultima" id="ultimaLectura">Sin lecturas todavía</div>
+      <div class="resumen-alarmas" id="resumenAlarmas">Sin alarmas configuradas</div>
+      <div class="metodo">Sensor digital DS18B20 · 12 bits (pasos de 0,0625 °C) · precisión ±0,5 °C</div>
+    </div>
+
+    <div class="acciones">
+      <button id="btnConectar">Conectar por Bluetooth</button>
+      <button id="btnLimpiar" class="secundario">Limpiar consola</button>
+    </div>
+
+    <button id="btnTodos" class="secundario diagnostico">Modo diagnostico: ver todos los dispositivos</button>
+
+    <div class="aviso" id="aviso"></div>
+  </div>
+
+  <div class="panel">
+    <div class="titulo-consola">
+      Salida de consola
+      <span id="contadorLineas">0 lineas</span>
+    </div>
+    <div class="consola" id="consola"></div>
+  </div>
+
+  <div class="panel">
+    <div class="titulo-consola">
+      Registro de temperatura
+      <span id="contadorRegistro">0 lecturas</span>
+    </div>
+    <div class="tabla-wrap">
+      <table>
+        <thead><tr><th>Fecha</th><th>Hora</th><th class="num">Temperatura</th></tr></thead>
+        <tbody id="cuerpoRegistro"></tbody>
+      </table>
+      <div class="vacio" id="registroVacio">Las lecturas aparecen acá al conectar la placa</div>
+    </div>
+    <div class="acciones-registro">
+      <button id="btnCSV" class="secundario">Descargar registro (CSV)</button>
+      <button id="btnBorrarRegistro" class="secundario">Borrar registro</button>
+    </div>
+  </div>
+
+  <p class="nota">
+    Necesita Chrome, Edge u Opera en escritorio o Android.
+    Safari y todos los navegadores de iPhone no soportan Web Bluetooth.
+  </p>
+
+  <!-- ================= Menu flotante de alarmas ================= -->
+  <div class="fondo-modal" id="fondoModal">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="tituloModal">
+      <div class="modal-cabecera">
+        <h2 id="tituloModal">Alarmas de temperatura</h2>
+        <button class="btn-cerrar" id="btnCerrarModal" aria-label="Cerrar">&times;</button>
+      </div>
+
+      <div class="modal-cuerpo">
+        <div class="seccion">
+          <p class="seccion-titulo">Límites</p>
+          <div class="fila-limite">
+            <label><input type="checkbox" id="chkMax"> <span><span class="marca-max">▲</span> Temperatura máxima</span></label>
+            <div class="campo-num"><input type="number" id="valMax" step="0.5" min="-55" max="125" value="90"> °C</div>
+          </div>
+          <div class="fila-limite">
+            <label><input type="checkbox" id="chkMin"> <span><span class="marca-min">▼</span> Temperatura mínima</span></label>
+            <div class="campo-num"><input type="number" id="valMin" step="0.5" min="-55" max="125" value="60"> °C</div>
+          </div>
+          <p class="ayuda">Avisa una vez al cruzar el límite. Para volver a avisar, la temperatura tiene que regresar al rango normal (con 0,5 °C de margen, para que no salte en cada lectura si queda justo en el borde).</p>
+        </div>
+
+        <div class="seccion">
+          <p class="seccion-titulo">Cómo avisar</p>
+          <div class="opciones">
+            <label class="chip"><input type="checkbox" id="chkSonido" checked>
+              <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/><path d="M19 5a10 10 0 0 1 0 14"/></svg>Sonar</span></label>
+            <label class="chip"><input type="checkbox" id="chkVibrar" checked>
+              <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="7" y="3" width="10" height="18" rx="2"/><path d="M3 8v8M21 8v8"/></svg>Vibrar</span></label>
+            <label class="chip"><input type="checkbox" id="chkNotif" checked>
+              <span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M7 9h10M7 13h6"/></svg>Notificación</span></label>
+          </div>
+          <p class="ayuda" id="ayudaSoporte"></p>
+        </div>
+
+        <div class="seccion">
+          <p class="seccion-titulo">Mensaje de la notificación</p>
+          <div class="selector">
+            <label><input type="radio" name="modoMsg" value="carisma" checked><span>Mensajes con carisma</span></label>
+            <label><input type="radio" name="modoMsg" value="propio"><span>Escribir el mío</span></label>
+          </div>
+
+          <div id="bloqueCarisma">
+            <p class="ayuda" style="margin-top:0">Cada vez que salta una alarma se elige uno distinto al azar. Algunos ejemplos:</p>
+            <p class="sub-ejemplos">Si se pasa del máximo</p>
+            <ul class="ejemplos max" id="ejemplosMax"></ul>
+            <p class="sub-ejemplos">Si baja del mínimo</p>
+            <ul class="ejemplos min" id="ejemplosMin"></ul>
+          </div>
+
+          <div id="bloquePropio" style="display:none">
+            <div class="campo-texto">
+              <label for="msgMax"><span class="marca-max">▲</span> Al superar el máximo</label>
+              <textarea id="msgMax" maxlength="200"></textarea>
+            </div>
+            <div class="campo-texto">
+              <label for="msgMin"><span class="marca-min">▼</span> Al bajar del mínimo</label>
+              <textarea id="msgMin" maxlength="200"></textarea>
+            </div>
+            <p class="ayuda">Podés usar <code>{temp}</code> (temperatura medida), <code>{limite}</code> (el límite configurado) y <code>{hora}</code>.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="error-form" id="errorForm"></div>
+      <div class="modal-pie">
+        <button class="secundario" id="btnProbar">Probar alarma</button>
+        <button id="btnGuardar">Guardar</button>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Tienen que coincidir exactamente con los UUID del sketch.
+  // Son lo unico que la pagina necesita saber de la placa: funciona igual
+  // con un ESP32 clasico o con un ESP32-C3 SuperMini.
+  const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
+  const CHARACTERISTIC_UUID = 'abcd1234-ab12-cd34-ef56-1234567890ab';
+
+  const btnConectar = document.getElementById('btnConectar');
+  const btnLimpiar = document.getElementById('btnLimpiar');
+  const btnTodos = document.getElementById('btnTodos');
+  const bloqueo = document.getElementById('bloqueo');
+  const bloqueoTexto = document.getElementById('bloqueoTexto');
+  const lectura = document.getElementById('lectura');
+  const punto = document.getElementById('punto');
+  const textoEstado = document.getElementById('textoEstado');
+  const aviso = document.getElementById('aviso');
+  const consola = document.getElementById('consola');
+  const contadorLineas = document.getElementById('contadorLineas');
+
+  let dispositivo = null;
+  let cantidadLineas = 0;
+
+  // Codigos de error del firmware DS18B20, con los mismos textos que
+  // imprime el sketch por el monitor serie
+  const ERRORES = {
+    0x01: {
+      estado: 'Sensor desconectado',
+      lineas: [
+        'Sensor desconectado (-127 C) o lectura con CRC invalido',
+        'Revisar cable amarillo en GPIO 4 y la resistencia de 4.7k a 3V3'
+      ]
+    },
+    0x02: {
+      estado: 'Sin sensor en el bus',
+      lineas: [
+        'No se encontro ningun DS18B20 en el bus',
+        'Revisar rojo a 3V3, negro a GND y la resistencia de 4.7k'
+      ]
+    },
+    0x03: {
+      estado: 'Linea de datos abierta',
+      lineas: ['Linea de datos abierta', 'Revisar el cable amarillo y su conexion al GPIO 4']
+    },
+    0x04: {
+      estado: 'Datos en corto a GND',
+      lineas: ['Linea de datos en corto a GND', 'Revisar que el amarillo no toque al negro']
+    },
+    0x05: {
+      estado: 'Datos en corto a VDD',
+      lineas: ['Linea de datos en corto a VDD', 'Revisar que el amarillo no toque al rojo']
+    },
+    0x06: {
+      estado: 'Valor de reset del sensor',
+      lineas: ['Valor de reset del sensor (85 C sin convertir)', 'Suele ser alimentacion floja: revisar el rojo en 3V3']
+    },
+    0x07: {
+      estado: 'Alimentacion insuficiente',
+      lineas: ['Alimentacion insuficiente', 'Conectar el rojo a 3V3 (no usar modo parasito)']
+    },
+    0x08: {
+      estado: 'Lectura fuera de rango',
+      lineas: ['Lectura fuera del rango del DS18B20 (-55 a 125 C)', 'Revisar conexiones y la resistencia de 4.7k']
+    }
+  };
+
+  // El DS18B20 no puede medir menos de -55 C. Una lectura de -200 C es
+  // el piso de la tabla NIST de la PT100: significa que la placa sigue
+  // corriendo el firmware viejo del MAX31865.
+  let avisoFirmwareViejo = false;
+
+  // ---------------------------------------------------------------
+  // Fecha y hora
+  //
+  // El ESP32-C3 no tiene reloj de tiempo real (RTC con pila): cuando se
+  // corta la alimentacion pierde la hora. Por eso la hora la pone el
+  // dispositivo que mira la pagina (celular o PC), que siempre la tiene
+  // sincronizada por internet o por la red celular. Cada lectura queda
+  // sellada en el momento exacto en que llega por Bluetooth.
+  // ---------------------------------------------------------------
+  const fechaHoy = document.getElementById('fechaHoy');
+  const horaAhora = document.getElementById('horaAhora');
+  const ultimaLectura = document.getElementById('ultimaLectura');
+  const cuerpoRegistro = document.getElementById('cuerpoRegistro');
+  const registroVacio = document.getElementById('registroVacio');
+  const contadorRegistro = document.getElementById('contadorRegistro');
+
+  const LOCALE = 'es-AR';
+  const MAX_FILAS_TABLA = 500;          // filas visibles en la tabla
+  const SEGUNDOS_DATO_VIEJO = 10;       // el firmware manda cada 2 s
+
+  const registro = [];                  // { fecha: Date, temp: number }
+  let ultimaFecha = null;
+
+  const dos = n => String(n).padStart(2, '0');
+  function fmtFecha(d) { return dos(d.getDate()) + '/' + dos(d.getMonth() + 1) + '/' + d.getFullYear(); }
+  function fmtHora(d)  { return dos(d.getHours()) + ':' + dos(d.getMinutes()) + ':' + dos(d.getSeconds()); }
+
+  function actualizarReloj() {
+    const ahora = new Date();
+    const dia = ahora.toLocaleDateString(LOCALE, { weekday: 'long' });
+    fechaHoy.textContent = dia.charAt(0).toUpperCase() + dia.slice(1) + ' ' + fmtFecha(ahora);
+    horaAhora.textContent = fmtHora(ahora);
+
+    if (ultimaFecha) {
+      const seg = Math.round((ahora - ultimaFecha) / 1000);
+      let hace;
+      if (seg < 60) hace = 'hace ' + seg + ' s';
+      else if (seg < 3600) hace = 'hace ' + Math.floor(seg / 60) + ' min';
+      else hace = 'hace ' + Math.floor(seg / 3600) + ' h';
+      ultimaLectura.textContent = 'Última lectura: ' + fmtFecha(ultimaFecha) + ' a las ' + fmtHora(ultimaFecha) + ' (' + hace + ')';
+      ultimaLectura.classList.toggle('vieja', seg > SEGUNDOS_DATO_VIEJO);
+    }
+  }
+
+  function registrarLectura(temp) {
+    const fecha = new Date();
+    ultimaFecha = fecha;
+    registro.push({ fecha, temp });
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td>' + fmtFecha(fecha) + '</td><td>' + fmtHora(fecha) +
+                   '</td><td class="num">' + temp.toFixed(2) + ' °C</td>';
+    cuerpoRegistro.insertBefore(tr, cuerpoRegistro.firstChild);   // la mas nueva arriba
+    while (cuerpoRegistro.children.length > MAX_FILAS_TABLA) {
+      cuerpoRegistro.removeChild(cuerpoRegistro.lastChild);
+    }
+
+    registroVacio.style.display = 'none';
+    contadorRegistro.textContent = registro.length + (registro.length === 1 ? ' lectura' : ' lecturas');
+    actualizarReloj();
+  }
+
+  // El CSV guarda TODAS las lecturas (no solo las visibles en la tabla).
+  // Separador ";" y coma decimal para que Excel en español lo abra bien.
+  function descargarCSV() {
+    if (!registro.length) { mostrarAviso('Todavía no hay lecturas para descargar.'); return; }
+    let csv = 'Fecha;Hora;Temperatura (C)\r\n';
+    for (const r of registro) {
+      csv += fmtFecha(r.fecha) + ';' + fmtHora(r.fecha) + ';' + r.temp.toFixed(2).replace('.', ',') + '\r\n';
+    }
+    const blob = new Blob(['﻿' + csv], { type: 'text/csv;charset=utf-8' });
+    const a = document.createElement('a');
+    const d = registro[0].fecha;
+    a.href = URL.createObjectURL(blob);
+    a.download = 'solarmate_' + d.getFullYear() + dos(d.getMonth() + 1) + dos(d.getDate()) +
+                 '_' + dos(d.getHours()) + dos(d.getMinutes()) + '.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+
+  function borrarRegistro() {
+    registro.length = 0;
+    cuerpoRegistro.innerHTML = '';
+    registroVacio.style.display = '';
+    contadorRegistro.textContent = '0 lecturas';
+  }
+
+  function agregarLinea(texto, clase) {
+    const div = document.createElement('div');
+    if (clase) div.className = clase;
+    // Cada linea con texto lleva la hora a la que llego, como un log
+    if (texto) {
+      const h = document.createElement('span');
+      h.className = 'hora';
+      h.textContent = '[' + fmtHora(new Date()) + '] ';
+      div.appendChild(h);
+    }
+    div.appendChild(document.createTextNode(texto));
+    consola.appendChild(div);
+    consola.scrollTop = consola.scrollHeight;
+    cantidadLineas++;
+    contadorLineas.textContent = cantidadLineas + (cantidadLineas === 1 ? ' linea' : ' lineas');
+  }
+
+  function mostrarAviso(msg) {
+    aviso.textContent = msg;
+    aviso.classList.add('visible');
+  }
+
+  function limpiarAviso() {
+    aviso.classList.remove('visible');
+  }
+
+  function setEstado(texto, clasePunto) {
+    textoEstado.textContent = texto;
+    punto.className = 'punto' + (clasePunto ? ' ' + clasePunto : '');
+  }
+
+  async function conectar() {
+    if (!navigator.bluetooth) {
+      mostrarAviso('Este navegador no soporta Web Bluetooth. Usa Chrome, Edge u Opera en escritorio o Android.');
+      return;
+    }
+
+    limpiarAviso();
+
+    try {
+      btnConectar.disabled = true;
+      setEstado('Buscando dispositivo...');
+
+      // Dos filtros, y el navegador muestra el dispositivo si cumple
+      // CUALQUIERA de los dos. Es a proposito: segun como el firmware
+      // reparta el advertising y el scan response, la placa puede quedar
+      // identificada por su UUID de servicio o solo por su nombre.
+      // Aceptando ambos, la pagina la encuentra en los dos casos.
+      dispositivo = await navigator.bluetooth.requestDevice({
+        filters: [
+          { services: [SERVICE_UUID] },
+          { namePrefix: 'Solarmate' }
+        ],
+        optionalServices: [SERVICE_UUID]
+      });
+
+      setEstado('Conectando...');
+      dispositivo.addEventListener('gattserverdisconnected', alDesconectar);
+
+      const server = await dispositivo.gatt.connect();
+      const service = await server.getPrimaryService(SERVICE_UUID);
+      const caracteristica = await service.getCharacteristic(CHARACTERISTIC_UUID);
+
+      await caracteristica.startNotifications();
+      caracteristica.addEventListener('characteristicvaluechanged', alRecibirValor);
+
+      // Leer el valor actual tambien, por si tarda la primera notificacion
+      const valorInicial = await caracteristica.readValue();
+      procesarMensaje(new TextDecoder().decode(valorInicial));
+
+      setEstado('Conectado', 'conectado');
+      // Se muestra el nombre que informa la placa, no uno fijo
+      agregarLinea('--- Conectado a ' + (dispositivo.name || 'dispositivo sin nombre') + ' ---', 'linea-sistema');
+      btnConectar.textContent = 'Desconectar';
+      btnConectar.disabled = false;
+      btnConectar.onclick = () => dispositivo.gatt.disconnect();
+
+    } catch (err) {
+      console.error(err);
+      setEstado('Error de conexion', 'falla');
+      btnConectar.disabled = false;
+      btnConectar.textContent = 'Reintentar';
+
+      if (err && err.name === 'SecurityError') {
+        mostrarAviso('El navegador bloqueo el Bluetooth por seguridad. La pagina tiene que estar servida por https:// o http://localhost, no abierta como archivo desde el disco.');
+      } else if (err && err.name === 'NotFoundError') {
+        mostrarAviso('No se selecciono ningun dispositivo, o no aparecio ninguna placa con el servicio del sensor. Probá el modo diagnostico para ver si la placa se esta anunciando.');
+      } else {
+        mostrarAviso('No se pudo conectar [' + (err && err.name ? err.name : 'error') + ']: ' + (err && err.message ? err.message : err));
+      }
+    }
+  }
+
+  function alRecibirValor(event) {
+    const texto = new TextDecoder().decode(event.target.value);
+    procesarMensaje(texto);
+  }
+
+  // Decodifica los mensajes cortos del ESP32 y reconstruye la salida
+  // tal como se ve en el monitor serie
+  function procesarMensaje(mensaje) {
+    const limpio = (mensaje || '').trim();
+    if (!limpio) return;
+
+    if (limpio.startsWith('T:')) {
+      const valor = parseFloat(limpio.slice(2));
+      if (isNaN(valor)) return;
+
+      if (valor < -55 || valor > 125) {
+        if (!avisoFirmwareViejo) {
+          avisoFirmwareViejo = true;
+          mostrarAviso('Llegan lecturas de ' + valor.toFixed(1) + ' °C, imposibles para un DS18B20 (mide de -55 a 125 °C). ' +
+            'La placa sigue corriendo el programa viejo del MAX31865: subi prograSolarmate_DS18B20.ino y verifica en el monitor serie que diga "Solarmate - DS18B20".');
+        }
+        agregarLinea('Lectura invalida: ' + valor.toFixed(3) + ' C (fuera del rango del DS18B20)', 'linea-falla');
+        setEstado('Firmware equivocado en la placa', 'falla');
+        lectura.textContent = '--.--';
+        lectura.classList.remove('activa');
+        return;
+      }
+
+      lectura.textContent = valor.toFixed(2);
+      lectura.classList.add('activa');
+
+      // Misma linea que imprime Serial.print en el sketch
+      agregarLinea('Temp1   = ' + valor.toFixed(2) + ' C (DS18B20)');
+      registrarLectura(valor);
+      evaluarAlarmas(valor);
+      agregarLinea('');
+
+      // Si venia de un error y el sensor volvio, se limpia el estado
+      if (dispositivo && dispositivo.gatt && dispositivo.gatt.connected) {
+        setEstado('Conectado', 'conectado');
+      }
+
+    } else if (limpio.startsWith('E:')) {
+      const codigo = parseInt(limpio.slice(2), 16);
+      if (isNaN(codigo)) return;
+
+      const hex = codigo.toString(16).toUpperCase().padStart(2, '0');
+      agregarLinea('Error 0x' + hex, 'linea-falla');
+
+      const error = ERRORES[codigo];
+      if (error) {
+        for (const l of error.lineas) agregarLinea(l, 'linea-falla');
+        setEstado(error.estado, 'falla');
+      } else {
+        agregarLinea('Codigo de error desconocido', 'linea-falla');
+        setEstado('Falla del sensor', 'falla');
+      }
+      agregarLinea('');
+
+      // Mientras haya error no se muestra una lectura vieja como si fuera actual
+      lectura.textContent = '--.--';
+      lectura.classList.remove('activa');
+    }
+  }
+
+  function alDesconectar() {
+    setEstado('Desconectado');
+    lectura.classList.remove('activa');
+    agregarLinea('--- Desconectado ---', 'linea-sistema');
+    btnConectar.textContent = 'Conectar por Bluetooth';
+    btnConectar.disabled = false;
+    btnConectar.onclick = conectar;
+  }
+
+  // Modo diagnostico: abre el dialogo del navegador sin ningun filtro.
+  // Sirve para contestar una sola pregunta: la placa se esta anunciando?
+  //   - Si aparece en esta lista pero no con el boton normal, el problema
+  //     esta en lo que anuncia el firmware (nombre o UUID).
+  //   - Si no aparece ni aca, la placa no esta anunciando nada: revisar
+  //     que el sketch haya llegado a setupBLE() mirando el monitor serie.
+  async function verTodos() {
+    if (!navigator.bluetooth) {
+      mostrarAviso('Este navegador no soporta Web Bluetooth. Usa Chrome, Edge u Opera en escritorio o Android.');
+      return;
+    }
+
+    limpiarAviso();
+
+    try {
+      const d = await navigator.bluetooth.requestDevice({
+        acceptAllDevices: true,
+        optionalServices: [SERVICE_UUID]
+      });
+
+      agregarLinea('--- Diagnostico ---', 'linea-sistema');
+      agregarLinea('Elegiste: ' + (d.name || '(sin nombre)'), 'linea-sistema');
+      agregarLinea('ID interno: ' + d.id, 'linea-sistema');
+
+      // Intentar leer el servicio para confirmar que es la placa correcta
+      agregarLinea('Probando si expone el servicio del sensor...', 'linea-sistema');
+      const server = await d.gatt.connect();
+      try {
+        await server.getPrimaryService(SERVICE_UUID);
+        agregarLinea('Servicio encontrado. Es la placa correcta.', 'linea-sistema');
+        agregarLinea('Ya podes usar el boton de conectar normal.', 'linea-sistema');
+      } catch (e) {
+        agregarLinea('Este dispositivo NO expone el servicio del sensor.', 'linea-falla');
+        agregarLinea('Revisa que SERVICE_UUID sea igual en el sketch y en esta pagina.', 'linea-falla');
+      }
+      d.gatt.disconnect();
+
+    } catch (err) {
+      console.error(err);
+      if (err && err.name === 'SecurityError') {
+        mostrarAviso('El navegador bloqueo el Bluetooth por seguridad. La pagina tiene que estar servida por https:// o http://localhost, no abierta como archivo desde el disco.');
+      } else if (err && err.name === 'NotFoundError') {
+        mostrarAviso('No se selecciono ningun dispositivo. Si la placa no figuraba en la lista, no esta anunciando: revisa el monitor serie para confirmar que el sketch llego a setupBLE().');
+      } else {
+        mostrarAviso('Error en el diagnostico [' + (err && err.name ? err.name : 'error') + ']: ' + (err && err.message ? err.message : err));
+      }
+    }
+  }
+
+  // ---------------------------------------------------------------
+  // Comprobacion al cargar la pagina.
+  //
+  // Web Bluetooth solo funciona en un "contexto seguro": https:// o
+  // http://localhost. Abrir el archivo con doble clic desde el disco
+  // (file://) NO sirve: el navegador rechaza la llamada con SecurityError
+  // y el dialogo de dispositivos nunca se abre, asi que parece que la
+  // placa no se detecta cuando en realidad nunca se llego a buscarla.
+  //
+  // Esta comprobacion lo detecta antes de que pase y explica como
+  // solucionarlo, en lugar de dejarte adivinando.
+  // ---------------------------------------------------------------
+  function comprobarEntorno() {
+    const esFile = location.protocol === 'file:';
+    const seguro = window.isSecureContext;
+    const tieneAPI = !!navigator.bluetooth;
+
+    if (esFile || !seguro) {
+      bloqueoTexto.innerHTML =
+        'Web Bluetooth solo funciona sobre <code>https://</code> o ' +
+        '<code>http://localhost</code>. Esta pagina se abrio como ' +
+        '<code>' + location.protocol + '</code>, y en ese caso el navegador ' +
+        'bloquea el Bluetooth sin mostrar ningun error visible.' +
+        '<ol>' +
+        '<li>Abri una terminal en la carpeta donde esta este archivo.</li>' +
+        '<li>Corre: <code>python -m http.server 8000</code></li>' +
+        '<li>Entra a <code>http://localhost:8000/index.html</code></li>' +
+        '</ol>' +
+        '<div class="origen">Si no tenes Python: <code>npx serve</code> con Node, ' +
+        'o la extension Live Server de VS Code hacen lo mismo.</div>';
+      bloqueo.classList.add('visible');
+      btnConectar.disabled = true;
+      btnTodos.disabled = true;
+      setEstado('Bluetooth bloqueado por el navegador', 'falla');
+      return false;
+    }
+
+    if (!tieneAPI) {
+      bloqueoTexto.innerHTML =
+        'Este navegador no tiene Web Bluetooth. Funciona en Chrome, Edge u ' +
+        'Opera, en escritorio o Android. Ningun navegador de iPhone lo soporta.';
+      bloqueo.classList.add('visible');
+      btnConectar.disabled = true;
+      btnTodos.disabled = true;
+      setEstado('Navegador sin soporte', 'falla');
+      return false;
+    }
+
+    return true;
+  }
+
+  // =================================================================
+  // ALARMAS
+  // =================================================================
+  const HISTERESIS = 0.5;          // °C que hay que volver para re-armar
+  const DURACION_SONIDO_MS = 60000; // suena hasta Detener, maximo 1 minuto
+  const CLAVE_CONFIG = 'solarmate.alarmas.v1';
+
+  // Mensajes con carisma. {temp}, {limite} y {hora} se reemplazan solos.
+  const MENSAJES_MAX = [
+    '¡Esto está que arde! El tubo llegó a {temp} °C y el máximo era {limite} °C.',
+    'Si fuera una milanesa ya estaría carbonizada: {temp} °C (máx. {limite} °C).',
+    'El sol se pasó de rosca: {temp} °C en el tubo, más que los {limite} °C que pediste.',
+    'Bajale un cambio: {temp} °C a las {hora}. Te pasaste de los {limite} °C.',
+    'Alerta de horno: {temp} °C. Ni el asado del domingo llega a tanto (máx. {limite} °C).',
+    '¡Fuego, fuego! El termómetro marca {temp} °C y el tope era {limite} °C.',
+    'La comida pide clemencia: {temp} °C, por encima de los {limite} °C.',
+    'Modo volcán activado: {temp} °C. Revisá el tubo, el máximo es {limite} °C.'
+  ];
+  const MENSAJES_MIN = [
+    'Se está enfriando la cosa: {temp} °C, por debajo de los {limite} °C.',
+    'Brrr… el tubo bajó a {temp} °C. El mínimo era {limite} °C.',
+    'Así no se cocina nada: {temp} °C (mín. {limite} °C). ¿Se nubló?',
+    'Alerta de frío a las {hora}: {temp} °C. Le falta sol para llegar a {limite} °C.',
+    'La comida está esperando calorcito: {temp} °C, menos que {limite} °C.',
+    'Temperatura en caída libre: {temp} °C. Pasaste el mínimo de {limite} °C.',
+    'El sol se tomó un recreo: {temp} °C en el tubo (mín. {limite} °C).',
+    'Esto está más frío que un mate olvidado: {temp} °C (mín. {limite} °C).'
+  ];
+  const TITULO_MAX = '🔥 Temperatura máxima superada';
+  const TITULO_MIN = '❄️ Temperatura por debajo del mínimo';
+
+  const configPorDefecto = {
+    maxActiva: false, max: 90,
+    minActiva: false, min: 60,
+    sonido: true, vibrar: true, notif: true,
+    modo: 'carisma',
+    msgMax: 'Atención: el tubo llegó a {temp} °C y superó el máximo de {limite} °C.',
+    msgMin: 'Atención: el tubo bajó a {temp} °C, por debajo del mínimo de {limite} °C.'
+  };
+
+  // localStorage puede fallar (modo incognito, permisos): siempre con try
+  function cargarConfig() {
+    try {
+      const guardada = JSON.parse(localStorage.getItem(CLAVE_CONFIG) || 'null');
+      if (guardada) return Object.assign({}, configPorDefecto, guardada);
+    } catch (e) {}
+    return Object.assign({}, configPorDefecto);
+  }
+  function guardarConfigEnDisco(c) {
+    try { localStorage.setItem(CLAVE_CONFIG, JSON.stringify(c)); } catch (e) {}
+  }
+
+  let config = cargarConfig();
+  // Estado de cada alarma: 'armada' (puede disparar) o 'disparada'
+  const estadoAlarma = { max: 'armada', min: 'armada' };
+  const ultimoMensaje = { max: -1, min: -1 };
+
+  // ---- Elementos ----
+  const $ = id => document.getElementById(id);
+  const fondoModal = $('fondoModal'), btnAlarmas = $('btnAlarmas');
+  const chkMax = $('chkMax'), valMax = $('valMax'), chkMin = $('chkMin'), valMin = $('valMin');
+  const chkSonido = $('chkSonido'), chkVibrar = $('chkVibrar'), chkNotif = $('chkNotif');
+  const msgMax = $('msgMax'), msgMin = $('msgMin');
+  const errorForm = $('errorForm'), resumenAlarmas = $('resumenAlarmas');
+  const alarmaActiva = $('alarmaActiva');
+
+  function fmtNum(n) { return Number(n).toFixed(1).replace('.', ','); }
+
+  function armarMensaje(tipo, temp, limite) {
+    let plantilla;
+    if (config.modo === 'propio') {
+      plantilla = (tipo === 'max' ? config.msgMax : config.msgMin) || configPorDefecto[tipo === 'max' ? 'msgMax' : 'msgMin'];
+    } else {
+      const lista = tipo === 'max' ? MENSAJES_MAX : MENSAJES_MIN;
+      let i;
+      do { i = Math.floor(Math.random() * lista.length); }
+      while (lista.length > 1 && i === ultimoMensaje[tipo]);   // no repetir el anterior
+      ultimoMensaje[tipo] = i;
+      plantilla = lista[i];
+    }
+    return plantilla
+      .replace(/\{temp\}/g, fmtNum(temp))
+      .replace(/\{limite\}/g, fmtNum(limite))
+      .replace(/\{hora\}/g, fmtHora(new Date()).slice(0, 5));
+  }
+
+  // ---- Sonido (Web Audio, sin archivos externos) ----
+  let audioCtx = null;
+  function desbloquearAudio() {
+    // Los navegadores solo dejan sonar despues de un toque del usuario
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) {}
+  }
+  document.addEventListener('pointerdown', desbloquearAudio, { passive: true });
+
+  function pitidos(tipo) {
+    if (!audioCtx) return;
+    // Agudo y subiendo para maximo, grave y bajando para minimo
+    const notas = tipo === 'max' ? [880, 1046, 1318] : [660, 523, 392];
+    const t0 = audioCtx.currentTime;
+    notas.forEach((f, i) => {
+      for (const rep of [0, 0.75]) {
+        const osc = audioCtx.createOscillator();
+        const gan = audioCtx.createGain();
+        osc.type = 'square';
+        osc.frequency.value = f;
+        const t = t0 + rep + i * 0.18;
+        gan.gain.setValueAtTime(0.0001, t);
+        gan.gain.exponentialRampToValueAtTime(0.18, t + 0.015);
+        gan.gain.exponentialRampToValueAtTime(0.0001, t + 0.15);
+        osc.connect(gan).connect(audioCtx.destination);
+        osc.start(t);
+        osc.stop(t + 0.16);
+      }
+    });
+  }
+
+  let intervaloAlarma = null, finAlarma = null;
+  function detenerAlarma() {
+    clearInterval(intervaloAlarma); clearTimeout(finAlarma);
+    intervaloAlarma = finAlarma = null;
+    try { navigator.vibrate && navigator.vibrate(0); } catch (e) {}
+    alarmaActiva.classList.remove('visible');
+  }
+
+  // ---- Notificaciones ----
+  // En Chrome para Android "new Notification()" no esta permitido: hay que
+  // mostrarlas desde un service worker (archivo sw.js, junto a esta pagina).
+  // En escritorio funcionan las dos formas.
+  // sw.js es OPCIONAL: la pagina funciona sola en un unico archivo.
+  // Si sw.js no esta, el registro falla en silencio y en Android la alarma
+  // usa sonido + vibracion + cartel en pantalla (sin notificacion del sistema).
+  let registroSW = null;
+  if ('serviceWorker' in navigator && window.isSecureContext && location.protocol !== 'file:') {
+    navigator.serviceWorker.register('sw.js').then(r => { registroSW = r; }).catch(() => {});
+  }
+
+  async function pedirPermisoNotif() {
+    if (!('Notification' in window)) return 'no-soportado';
+    if (Notification.permission === 'default') {
+      try { return await Notification.requestPermission(); } catch (e) { return 'denied'; }
+    }
+    return Notification.permission;
+  }
+
+  async function mostrarNotificacion(titulo, cuerpo, tipo) {
+    if (!('Notification' in window) || Notification.permission !== 'granted') return false;
+    const opciones = {
+      body: cuerpo, tag: 'solarmate-' + tipo, renotify: true,
+      requireInteraction: true, vibrate: config.vibrar ? [400, 200, 400] : undefined
+    };
+    try {
+      const reg = registroSW || (navigator.serviceWorker && await navigator.serviceWorker.getRegistration());
+      if (reg) { await reg.showNotification(titulo, opciones); return true; }
+    } catch (e) {}
+    try { new Notification(titulo, opciones); return true; } catch (e) { return false; }
+  }
+
+  // ---- Disparo ----
+  function dispararAlarma(tipo, temp, limite) {
+    const titulo = tipo === 'max' ? TITULO_MAX : TITULO_MIN;
+    const mensaje = armarMensaje(tipo, temp, limite);
+
+    detenerAlarma();
+    $('alarmaTitulo').textContent = titulo;
+    $('alarmaMensaje').textContent = mensaje;
+    alarmaActiva.className = 'alarma-activa visible ' + tipo;
+
+    agregarLinea('ALARMA ' + (tipo === 'max' ? 'MAXIMO' : 'MINIMO') + ': ' + mensaje, 'linea-falla');
+
+    const ciclo = () => {
+      if (config.sonido) pitidos(tipo);
+      if (config.vibrar) { try { navigator.vibrate && navigator.vibrate([500, 250, 500, 250, 500]); } catch (e) {} }
+    };
+    if (config.sonido || config.vibrar) {
+      ciclo();
+      intervaloAlarma = setInterval(ciclo, 2500);
+      finAlarma = setTimeout(() => { clearInterval(intervaloAlarma); intervaloAlarma = null; }, DURACION_SONIDO_MS);
+    }
+    if (config.notif) mostrarNotificacion(titulo, mensaje, tipo);
+  }
+
+  // Se llama con cada lectura valida
+  function evaluarAlarmas(temp) {
+    if (config.maxActiva) {
+      if (estadoAlarma.max === 'armada' && temp >= config.max) {
+        estadoAlarma.max = 'disparada';
+        dispararAlarma('max', temp, config.max);
+      } else if (estadoAlarma.max === 'disparada' && temp <= config.max - HISTERESIS) {
+        estadoAlarma.max = 'armada';
+        agregarLinea('Temperatura de vuelta por debajo del maximo. Alarma re-armada.', 'linea-sistema');
+      }
+    }
+    if (config.minActiva) {
+      if (estadoAlarma.min === 'armada' && temp <= config.min) {
+        estadoAlarma.min = 'disparada';
+        dispararAlarma('min', temp, config.min);
+      } else if (estadoAlarma.min === 'disparada' && temp >= config.min + HISTERESIS) {
+        estadoAlarma.min = 'armada';
+        agregarLinea('Temperatura de vuelta por encima del minimo. Alarma re-armada.', 'linea-sistema');
+      }
+    }
+  }
+
+  // ---- Resumen en la pantalla principal ----
+  function actualizarResumen() {
+    const partes = [];
+    if (config.maxActiva) partes.push('<b>▲ ' + fmtNum(config.max) + ' °C</b>');
+    if (config.minActiva) partes.push('<b>▼ ' + fmtNum(config.min) + ' °C</b>');
+    if (partes.length) {
+      const como = [config.sonido && 'sonido', config.vibrar && 'vibración', config.notif && 'notificación'].filter(Boolean);
+      resumenAlarmas.innerHTML = 'Alarmas: ' + partes.join(' · ') + (como.length ? ' — ' + como.join(', ') : ' — sin aviso elegido');
+      btnAlarmas.classList.add('activas');
+    } else {
+      resumenAlarmas.textContent = 'Sin alarmas configuradas';
+      btnAlarmas.classList.remove('activas');
+    }
+  }
+
+  // ---- Menu ----
+  function llenarEjemplos() {
+    const ej = (lista, lim) => lista.slice(0, 3).map(m =>
+      '<li>' + m.replace(/\{temp\}/g, fmtNum(lim + (lista === MENSAJES_MAX ? 2 : -2)))
+                .replace(/\{limite\}/g, fmtNum(lim)).replace(/\{hora\}/g, '13:45') + '</li>').join('');
+    $('ejemplosMax').innerHTML = ej(MENSAJES_MAX, Number(valMax.value) || 90);
+    $('ejemplosMin').innerHTML = ej(MENSAJES_MIN, Number(valMin.value) || 60);
+  }
+
+  function actualizarModoMsg() {
+    const modo = document.querySelector('input[name="modoMsg"]:checked').value;
+    $('bloqueCarisma').style.display = modo === 'carisma' ? '' : 'none';
+    $('bloquePropio').style.display = modo === 'propio' ? '' : 'none';
+  }
+
+  function actualizarHabilitados() {
+    valMax.disabled = !chkMax.checked;
+    valMin.disabled = !chkMin.checked;
+  }
+
+  function actualizarAyudaSoporte() {
+    const avisos = [];
+    if (!('vibrate' in navigator)) avisos.push('este navegador no puede vibrar (iPhone y la mayoría de las PC no vibran)');
+    if (!('Notification' in window)) avisos.push('este navegador no soporta notificaciones');
+    else if (Notification.permission === 'denied') avisos.push('las notificaciones están bloqueadas: habilitalas desde el candado de la barra de direcciones');
+    else if (/Android/i.test(navigator.userAgent) && !registroSW) avisos.push('en Android la notificación del sistema necesita el archivo opcional sw.js junto a la página; sin él igual suena, vibra y aparece el cartel de alarma');
+    $('ayudaSoporte').textContent = avisos.length ? 'Ojo: ' + avisos.join('; ') + '.' : '';
+  }
+
+  let elementoPrevio = null;
+  function abrirModal() {
+    chkMax.checked = config.maxActiva; valMax.value = config.max;
+    chkMin.checked = config.minActiva; valMin.value = config.min;
+    chkSonido.checked = config.sonido; chkVibrar.checked = config.vibrar; chkNotif.checked = config.notif;
+    document.querySelector('input[name="modoMsg"][value="' + config.modo + '"]').checked = true;
+    msgMax.value = config.msgMax; msgMin.value = config.msgMin;
+    errorForm.classList.remove('visible');
+    actualizarHabilitados(); actualizarModoMsg(); llenarEjemplos(); actualizarAyudaSoporte();
+    elementoPrevio = document.activeElement;
+    fondoModal.classList.add('abierto');
+    $('btnCerrarModal').focus();
+  }
+  function cerrarModal() {
+    fondoModal.classList.remove('abierto');
+    if (elementoPrevio && elementoPrevio.focus) elementoPrevio.focus();
+  }
+
+  function leerFormulario() {
+    const nueva = {
+      maxActiva: chkMax.checked, max: parseFloat(valMax.value),
+      minActiva: chkMin.checked, min: parseFloat(valMin.value),
+      sonido: chkSonido.checked, vibrar: chkVibrar.checked, notif: chkNotif.checked,
+      modo: document.querySelector('input[name="modoMsg"]:checked').value,
+      msgMax: msgMax.value.trim(), msgMin: msgMin.value.trim()
+    };
+    let error = '';
+    if (nueva.maxActiva && (isNaN(nueva.max) || nueva.max < -55 || nueva.max > 125)) error = 'El máximo tiene que estar entre -55 y 125 °C (rango del DS18B20).';
+    else if (nueva.minActiva && (isNaN(nueva.min) || nueva.min < -55 || nueva.min > 125)) error = 'El mínimo tiene que estar entre -55 y 125 °C (rango del DS18B20).';
+    else if (nueva.maxActiva && nueva.minActiva && nueva.min >= nueva.max) error = 'El mínimo tiene que ser menor que el máximo.';
+    else if (nueva.modo === 'propio' && ((nueva.maxActiva && !nueva.msgMax) || (nueva.minActiva && !nueva.msgMin))) error = 'Escribí el mensaje para cada alarma activa, o elegí los mensajes con carisma.';
+    if (isNaN(nueva.max)) nueva.max = config.max;
+    if (isNaN(nueva.min)) nueva.min = config.min;
+    return { nueva, error };
+  }
+
+  async function guardarAlarmas() {
+    const { nueva, error } = leerFormulario();
+    if (error) { errorForm.textContent = error; errorForm.classList.add('visible'); return; }
+    if (nueva.notif) await pedirPermisoNotif();
+
+    const cambioLimites = nueva.max !== config.max || nueva.min !== config.min ||
+                          nueva.maxActiva !== config.maxActiva || nueva.minActiva !== config.minActiva;
+    config = nueva;
+    guardarConfigEnDisco(config);
+    if (cambioLimites) { estadoAlarma.max = 'armada'; estadoAlarma.min = 'armada'; }
+
+    actualizarResumen();
+    agregarLinea('--- Alarmas guardadas: ' + resumenAlarmas.textContent.replace(/^Alarmas: /, '') + ' ---', 'linea-sistema');
+    cerrarModal();
+  }
+
+  async function probarAlarma() {
+    const { nueva } = leerFormulario();
+    const previa = config;
+    config = nueva;                         // probar con lo que esta en pantalla
+    if (nueva.notif) await pedirPermisoNotif();
+    actualizarAyudaSoporte();
+    const tipo = nueva.minActiva && !nueva.maxActiva ? 'min' : 'max';
+    const lim = tipo === 'max' ? nueva.max : nueva.min;
+    dispararAlarma(tipo, tipo === 'max' ? lim + 1.5 : lim - 1.5, lim);
+    config = previa;
+  }
+
+  btnAlarmas.onclick = abrirModal;
+  $('btnCerrarModal').onclick = cerrarModal;
+  $('btnGuardar').onclick = guardarAlarmas;
+  $('btnProbar').onclick = probarAlarma;
+  $('btnDetener').onclick = detenerAlarma;
+  fondoModal.addEventListener('click', e => { if (e.target === fondoModal) cerrarModal(); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape' && fondoModal.classList.contains('abierto')) cerrarModal(); });
+  chkMax.onchange = chkMin.onchange = actualizarHabilitados;
+  valMax.oninput = valMin.oninput = llenarEjemplos;
+  document.querySelectorAll('input[name="modoMsg"]').forEach(r => r.onchange = actualizarModoMsg);
+  chkNotif.onchange = async () => { if (chkNotif.checked) { await pedirPermisoNotif(); actualizarAyudaSoporte(); } };
+
+  actualizarResumen();
+
+  btnConectar.onclick = conectar;
+  btnTodos.onclick = verTodos;
+  document.getElementById('btnCSV').onclick = descargarCSV;
+  document.getElementById('btnBorrarRegistro').onclick = borrarRegistro;
+
+  actualizarReloj();
+  setInterval(actualizarReloj, 1000);
+
+  comprobarEntorno();
+
+  btnLimpiar.onclick = () => {
+    consola.innerHTML = '';
+    cantidadLineas = 0;
+    contadorLineas.textContent = '0 lineas';
+  };
+</script>
+</body>
+</html>

@@ -369,7 +369,11 @@
             <label><input type="checkbox" id="chkMin"> <span><span class="marca-min">▼</span> Temperatura mínima</span></label>
             <div class="campo-num"><input type="number" id="valMin" step="0.5" min="-55" max="125" value="60"> °C</div>
           </div>
-          <p class="ayuda">Avisa una vez al cruzar el límite. Para volver a avisar, la temperatura tiene que regresar al rango normal (con 0,5 °C de margen, para que no salte en cada lectura si queda justo en el borde).</p>
+          <div class="fila-limite">
+            <label for="valEspera"><span>Apagar sola al volver al rango después de</span></label>
+            <div class="campo-num"><input type="number" id="valEspera" step="1" min="0" max="60" value="3"> s</div>
+          </div>
+          <p class="ayuda">Suena al cruzar el límite. Si la temperatura vuelve al rango y se mantiene ese tiempo, deja de sonar sola y queda lista para avisar otra vez. Si en ese lapso se vuelve a salir, sigue sonando.</p>
         </div>
 
         <div class="seccion">
@@ -430,7 +434,7 @@
   // con un ESP32 clasico o con un ESP32-C3 SuperMini.
   // Subir este numero en cada cambio: sirve para saber si el navegador
   // esta mostrando la version nueva o una vieja guardada en cache.
-  const VERSION_PAGINA = '1.4 (alarma al guardar)';
+  const VERSION_PAGINA = '1.5 (se apaga al volver al rango)';
   const SERVICE_UUID = '12345678-1234-1234-1234-1234567890ab';
   const CHARACTERISTIC_UUID = 'abcd1234-ab12-cd34-ef56-1234567890ab';
 
@@ -856,7 +860,6 @@
   // =================================================================
   // ALARMAS
   // =================================================================
-  const HISTERESIS = 0.5;          // °C que hay que volver para re-armar
   const DURACION_SONIDO_MS = 60000; // suena hasta Detener, maximo 1 minuto
   const CLAVE_CONFIG = 'solarmate.alarmas.v1';
 
@@ -885,6 +888,7 @@
   const TITULO_MIN = '❄️ Temperatura por debajo del mínimo';
 
   const configPorDefecto = {
+    espera: 3,                     // s en rango para apagarse sola
     maxActiva: false, max: 90,
     minActiva: false, min: 60,
     sonido: true, vibrar: true, notif: true,
@@ -973,9 +977,11 @@
   }
 
   let intervaloAlarma = null, finAlarma = null;
+  let tipoSonando = null;               // 'max', 'min' o null
   function detenerAlarma() {
     clearInterval(intervaloAlarma); clearTimeout(finAlarma);
     intervaloAlarma = finAlarma = null;
+    tipoSonando = null;
     try { navigator.vibrate && navigator.vibrate(0); } catch (e) {}
     alarmaActiva.classList.remove('visible');
   }
@@ -1019,8 +1025,9 @@
     const mensaje = armarMensaje(tipo, temp, limite);
 
     detenerAlarma();
+    tipoSonando = tipo;
     $('alarmaTitulo').textContent = titulo;
-    $('alarmaMensaje').textContent = mensaje;
+    $('alarmaMensaje').textContent = mensaje + ' Se apaga sola si vuelve al rango durante ' + config.espera + ' s.';
     alarmaActiva.className = 'alarma-activa visible ' + tipo;
 
     agregarLinea('ALARMA ' + (tipo === 'max' ? 'MAXIMO' : 'MINIMO') + ': ' + mensaje, 'linea-falla');
@@ -1037,26 +1044,62 @@
     if (config.notif) mostrarNotificacion(titulo, mensaje, tipo);
   }
 
+  // ---- Vuelta al rango ----
+  // Cuando una alarma disparada ve que la temperatura volvio al rango
+  // (por ejemplo minimo 28 y sube a 28,06), arranca una cuenta de
+  // config.espera segundos. Si al terminar la ultima lectura sigue dentro
+  // del rango, la alarma se apaga sola y queda lista para volver a avisar.
+  // Si en ese lapso la temperatura se vuelve a salir, la cuenta se cancela
+  // y sigue sonando.
+  const timerVuelta = { max: null, min: null };
+
+  function fueraDeRango(tipo, temp) {
+    return tipo === 'max' ? temp >= config.max : temp <= config.min;
+  }
+
+  function cancelarVuelta(tipo) {
+    clearTimeout(timerVuelta[tipo]);
+    timerVuelta[tipo] = null;
+  }
+
+  function confirmarVuelta(tipo) {
+    timerVuelta[tipo] = null;
+    const ultima = registro[registro.length - 1];
+    if (!ultima || fueraDeRango(tipo, ultima.temp)) return;   // se volvio a salir
+    estadoAlarma[tipo] = 'armada';
+    const nombre = tipo === 'max' ? 'maximo' : 'minimo';
+    if (tipoSonando === tipo) {
+      detenerAlarma();
+      agregarLinea('Temperatura de vuelta en rango (' + fmtNum(ultima.temp) + ' C) durante ' +
+                   config.espera + ' s: alarma de ' + nombre + ' apagada.', 'linea-sistema');
+    } else {
+      agregarLinea('Temperatura de vuelta en rango: alarma de ' + nombre + ' lista para volver a avisar.', 'linea-sistema');
+    }
+  }
+
+  function evaluarUna(tipo, temp) {
+    const limite = tipo === 'max' ? config.max : config.min;
+    const fuera = fueraDeRango(tipo, temp);
+
+    if (estadoAlarma[tipo] === 'armada') {
+      if (fuera) {
+        estadoAlarma[tipo] = 'disparada';
+        dispararAlarma(tipo, temp, limite);
+      }
+      return;
+    }
+    // Disparada
+    if (fuera) {
+      cancelarVuelta(tipo);                         // se salio de nuevo: sigue sonando
+    } else if (!timerVuelta[tipo]) {
+      timerVuelta[tipo] = setTimeout(() => confirmarVuelta(tipo), config.espera * 1000);
+    }
+  }
+
   // Se llama con cada lectura valida
   function evaluarAlarmas(temp) {
-    if (config.maxActiva) {
-      if (estadoAlarma.max === 'armada' && temp >= config.max) {
-        estadoAlarma.max = 'disparada';
-        dispararAlarma('max', temp, config.max);
-      } else if (estadoAlarma.max === 'disparada' && temp <= config.max - HISTERESIS) {
-        estadoAlarma.max = 'armada';
-        agregarLinea('Temperatura de vuelta por debajo del maximo. Alarma re-armada.', 'linea-sistema');
-      }
-    }
-    if (config.minActiva) {
-      if (estadoAlarma.min === 'armada' && temp <= config.min) {
-        estadoAlarma.min = 'disparada';
-        dispararAlarma('min', temp, config.min);
-      } else if (estadoAlarma.min === 'disparada' && temp >= config.min + HISTERESIS) {
-        estadoAlarma.min = 'armada';
-        agregarLinea('Temperatura de vuelta por encima del minimo. Alarma re-armada.', 'linea-sistema');
-      }
-    }
+    if (config.maxActiva) evaluarUna('max', temp);
+    if (config.minActiva) evaluarUna('min', temp);
   }
 
   // ---- Resumen en la pantalla principal ----
@@ -1107,6 +1150,7 @@
   function abrirModal() {
     chkMax.checked = config.maxActiva; valMax.value = config.max;
     chkMin.checked = config.minActiva; valMin.value = config.min;
+    $('valEspera').value = config.espera;
     chkSonido.checked = config.sonido; chkVibrar.checked = config.vibrar; chkNotif.checked = config.notif;
     document.querySelector('input[name="modoMsg"][value="' + config.modo + '"]').checked = true;
     msgMax.value = config.msgMax; msgMin.value = config.msgMin;
@@ -1123,6 +1167,7 @@
 
   function leerFormulario() {
     const nueva = {
+      espera: parseFloat($('valEspera').value),
       maxActiva: chkMax.checked, max: parseFloat(valMax.value),
       minActiva: chkMin.checked, min: parseFloat(valMin.value),
       sonido: chkSonido.checked, vibrar: chkVibrar.checked, notif: chkNotif.checked,
@@ -1133,6 +1178,7 @@
     if (nueva.maxActiva && (isNaN(nueva.max) || nueva.max < -55 || nueva.max > 125)) error = 'El máximo tiene que estar entre -55 y 125 °C (rango del DS18B20).';
     else if (nueva.minActiva && (isNaN(nueva.min) || nueva.min < -55 || nueva.min > 125)) error = 'El mínimo tiene que estar entre -55 y 125 °C (rango del DS18B20).';
     else if (nueva.maxActiva && nueva.minActiva && nueva.min >= nueva.max) error = 'El mínimo tiene que ser menor que el máximo.';
+    else if (isNaN(nueva.espera) || nueva.espera < 0 || nueva.espera > 60) error = 'El tiempo para apagarse sola tiene que estar entre 0 y 60 segundos.';
     else if (nueva.modo === 'propio' && ((nueva.maxActiva && !nueva.msgMax) || (nueva.minActiva && !nueva.msgMin))) error = 'Escribí el mensaje para cada alarma activa, o elegí los mensajes con carisma.';
     if (isNaN(nueva.max)) nueva.max = config.max;
     if (isNaN(nueva.min)) nueva.min = config.min;
@@ -1153,6 +1199,8 @@
     // a la proxima lectura.
     estadoAlarma.max = 'armada';
     estadoAlarma.min = 'armada';
+    cancelarVuelta('max');
+    cancelarVuelta('min');
 
     actualizarResumen();
     agregarLinea('--- Alarmas guardadas: ' + resumenAlarmas.textContent.replace(/^Alarmas: /, '') + ' ---', 'linea-sistema');
